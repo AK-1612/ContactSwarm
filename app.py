@@ -98,21 +98,26 @@ div.stButton > button:hover {
     background-color: #FFF176 !important;
 }
 
-/* Tabs */
-div[data-testid="stTabs"] button[data-baseweb="tab"] {
+/* Segmented Navigation Bar */
+div[data-testid="stSegmentedControl"] {
+    margin-bottom: 1.5rem !important;
+}
+div[data-testid="stSegmentedControl"] button {
     font-size: 11px !important;
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 1px !important;
-    color: #52525B !important;
-    padding: 10px 16px !important;
+    padding: 10px 20px !important;
+    border-radius: 2px !important;
+    border: 1px solid #1F1F28 !important;
+    background-color: #111115 !important;
+    color: #A1A1AA !important;
 }
-div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
-    color: #FFE600 !important;
-    border-bottom: 2px solid #FFE600 !important;
-}
-div[data-testid="stTabs"] [data-testid="stTabsContent"] {
-    padding-top: 1.5rem !important;
+div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+    background-color: #FFE600 !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+    border-color: #FFE600 !important;
 }
 
 /* Selectbox, radio */
@@ -414,17 +419,25 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# -- Tabs --
-tab1, tab2, tab3, tab4 = st.tabs([
-    "RISK MATRIX",
-    "WORKSTREAM BREAKDOWN",
-    "CONTRACT CLAUSES",
-    "EXPORT"
-])
+# -- Navigation View Switcher --
+nav_options = ["RISK MATRIX", "WORKSTREAM BREAKDOWN", "CONTRACT CLAUSES", "EXPORT"]
+if hasattr(st, "segmented_control"):
+    active_tab = st.segmented_control(
+        "Diligence Navigation",
+        options=nav_options,
+        default="RISK MATRIX",
+        label_visibility="collapsed"
+    ) or "RISK MATRIX"
+else:
+    active_tab = st.radio(
+        "Diligence Navigation",
+        options=nav_options,
+        horizontal=True,
+        label_visibility="collapsed"
+    )
 
-
-# -- Tab 1: Risk Matrix --
-with tab1:
+# -- View 1: Risk Matrix --
+if active_tab == "RISK MATRIX":
     # Filters
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -480,8 +493,8 @@ with tab1:
 """, unsafe_allow_html=True)
 
 
-# -- Tab 2: Workstream Breakdown --
-with tab2:
+# -- View 2: Workstream Breakdown --
+elif active_tab == "WORKSTREAM BREAKDOWN":
     ws_data = {
         "Legal":     [r for r in risks if r.category == "Legal"],
         "Financial": [r for r in risks if r.category == "Financial"],
@@ -521,22 +534,22 @@ with tab2:
 """, unsafe_allow_html=True)
 
         if ws_risks:
-            with st.expander(f"View {total} {ws} finding(s)", expanded=False):
-                for r in ws_risks:
-                    sev_color = "#DC2626" if r.severity == "High" else ("#F59E0B" if r.severity == "Medium" else "#2563EB")
-                    st.markdown(f"""
-<div style="border-left:2px solid {sev_color};padding:10px 14px;margin-bottom:10px;">
+            for r in ws_risks:
+                sev_color = "#DC2626" if r.severity == "High" else ("#F59E0B" if r.severity == "Medium" else "#2563EB")
+                st.markdown(f"""
+<div style="border-left:2px solid {sev_color};background:#111115;border:1px solid #1F1F28;border-left:3px solid {sev_color};border-radius:2px;padding:12px 16px;margin-bottom:10px;">
     <div style="font-size:13px;font-weight:600;color:#FFFFFF;margin-bottom:4px;">{r.clause_reference}</div>
     <div style="font-size:11px;color:#52525B;margin-bottom:6px;">{r.contract_name}</div>
     <div style="font-size:12px;color:#A1A1AA;line-height:1.5;margin-bottom:6px;">{r.description}</div>
     <div style="font-size:12px;color:#D4D4D8;"><span style="color:#71717A;">Action:</span> {r.mitigation}</div>
 </div>
 """, unsafe_allow_html=True)
-        st.markdown("")
+        else:
+            st.markdown(f"<div style='font-size:12px;color:#52525B;padding:4px 0 12px;'>No findings under {ws} workstream.</div>", unsafe_allow_html=True)
 
 
-# -- Tab 3: Contract Clauses --
-with tab3:
+# -- View 3: Contract Clauses --
+elif active_tab == "CONTRACT CLAUSES":
     if state.contracts:
         doc_sel = st.selectbox("Document", list(state.contracts.keys()))
         txt = state.contracts[doc_sel]
@@ -552,8 +565,8 @@ with tab3:
         st.markdown("<div style='font-size:13px;color:#52525B;'>No contract text available.</div>", unsafe_allow_html=True)
 
 
-# -- Tab 4: Export --
-with tab4:
+# -- View 4: Export --
+elif active_tab == "EXPORT":
     pkg_name = st.session_state.get("package_name", "VDR Package")
 
     memo_lines = [
