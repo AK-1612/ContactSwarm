@@ -3,11 +3,10 @@ import io
 import json
 import pandas as pd
 import streamlit as st
-from pypdf import PdfReader
 
-from state import VDRAnalysisState, RiskItem
+from state import VDRAnalysisState
 from doc_parser import DocumentParser
-from orchestrator import run_contract_swarm, run_vdr_zip_audit
+from orchestrator import run_contract_swarm
 
 # Auto-generate sample VDR contracts on first boot (required for Streamlit Cloud)
 _vdr_dir = "vdr_docs"
@@ -20,720 +19,608 @@ if not os.path.exists(_zip_path):
         pass
 
 st.set_page_config(
-    page_title="EY Strategy and Transactions - ContractSwarm",
+    page_title="ContractSwarm - EY Strategy and Transactions",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom EY Corporate Dark Styling (Pure Black BG, No emojis, no symbols, zero top gap)
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    /* Global Canvas and Black Background */
-    html, body, [class*="css"], .stApp {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        background-color: #0A0A0C !important;
-        color: #F4F4F6 !important;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    /* ELIMINATE TOP GAP COMPLETELY */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-        height: 1.5rem !important;
-        min-height: 0px !important;
-    }
+html, body, [class*="css"], .stApp {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: #09090B !important;
+    color: #F4F4F5 !important;
+}
 
-    .main .block-container,
-    div[data-testid="stMainBlockContainer"],
-    .block-container {
-        padding-top: 0rem !important;
-        padding-bottom: 2rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        max-width: 100% !important;
-    }
+/* Remove all top padding */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 0px !important;
+}
+.main .block-container,
+div[data-testid="stMainBlockContainer"],
+.block-container {
+    padding-top: 0 !important;
+    padding-bottom: 3rem !important;
+    padding-left: 2.5rem !important;
+    padding-right: 2.5rem !important;
+    max-width: 100% !important;
+}
+div[data-testid="stSidebarHeader"],
+div[data-testid="stSidebarHeader"] > * {
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+div[data-testid="stSidebarContent"] {
+    padding-top: 2rem !important;
+    background-color: #0D0D10 !important;
+}
+section[data-testid="stSidebar"] {
+    background-color: #0D0D10 !important;
+    border-right: 1px solid #1F1F28 !important;
+}
 
-    div[data-testid="stSidebarHeader"] {
-        height: 0px !important;
-        padding-top: 0px !important;
-    }
+/* Sidebar text */
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div {
+    color: #A1A1AA !important;
+    font-size: 13px !important;
+}
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] h2 {
+    color: #FFFFFF !important;
+    font-size: 12px !important;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+}
 
-    div[data-testid="stSidebarContent"] {
-        padding-top: 1rem !important;
-    }
-    
-    /* Top EY Yellow Brand Accent Bar */
-    .ey-top-accent {
-        height: 4px;
-        background-color: #FFE600;
-        width: 100%;
-        margin: 0 0 16px 0;
-        padding: 0;
-    }
-    
-    /* EY Corporate Masthead */
-    .ey-masthead {
-        background-color: #121216;
-        color: #FFFFFF;
-        padding: 22px 28px;
-        border-radius: 2px;
-        margin-bottom: 22px;
-        border-left: 5px solid #FFE600;
-        border-top: 1px solid #22222A;
-        border-right: 1px solid #22222A;
-        border-bottom: 1px solid #22222A;
-    }
-    
-    .ey-brand-label {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-weight: 700;
-        color: #FFE600;
-        margin-bottom: 6px;
-    }
-    
-    .ey-main-title {
-        font-size: 24px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-        color: #FFFFFF;
-        margin: 0 0 4px 0;
-    }
-    
-    .ey-sub-title {
-        font-size: 13px;
-        color: #9E9EA8;
-        margin: 0;
-        font-weight: 400;
-    }
-    
-    /* KPI Metric Cards */
-    .ey-kpi-container {
-        display: flex;
-        gap: 16px;
-        margin-bottom: 22px;
-    }
-    
-    .ey-kpi-card {
-        flex: 1;
-        background-color: #121216;
-        border: 1px solid #24242E;
-        border-top: 3px solid #3E3E4C;
-        border-radius: 2px;
-        padding: 16px 18px;
-    }
-    
-    .ey-kpi-card-high {
-        border-top: 3px solid #DC2626 !important;
-    }
-    
-    .ey-kpi-card-medium {
-        border-top: 3px solid #F59E0B !important;
-    }
-    
-    .ey-kpi-card-status {
-        border-top: 3px solid #FFE600 !important;
-    }
-    
-    .ey-kpi-label {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        font-weight: 600;
-        color: #9E9EA8;
-        margin-bottom: 6px;
-    }
-    
-    .ey-kpi-value {
-        font-size: 28px;
-        font-weight: 700;
-        color: #FFFFFF;
-        line-height: 1.1;
-    }
-    
-    .ey-kpi-subtext {
-        font-size: 11px;
-        color: #6C6C78;
-        margin-top: 4px;
-    }
-    
-    /* Executive Summary Box */
-    .ey-summary-box {
-        background-color: #121216;
-        border: 1px solid #24242E;
-        border-left: 4px solid #FFE600;
-        border-radius: 2px;
-        padding: 18px 22px;
-        margin-bottom: 22px;
-    }
-    
-    .ey-summary-title {
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 700;
-        color: #FFE600;
-        margin-bottom: 8px;
-    }
-    
-    .ey-summary-text {
-        font-size: 14px;
-        line-height: 1.6;
-        color: #D4D4D8;
-        margin: 0;
-    }
-    
-    /* Detail Finding Cards */
-    .ey-finding-card {
-        background-color: #121216;
-        border: 1px solid #24242E;
-        border-radius: 2px;
-        padding: 16px 20px;
-        margin-bottom: 14px;
-    }
-    
-    .ey-badge {
-        display: inline-block;
-        padding: 2px 7px;
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        border-radius: 2px;
-        margin-right: 8px;
-    }
-    
-    .ey-badge-high {
-        background-color: #DC2626;
-        color: #FFFFFF;
-    }
-    
-    .ey-badge-medium {
-        background-color: #F59E0B;
-        color: #000000;
-    }
-    
-    .ey-badge-low {
-        background-color: #2563EB;
-        color: #FFFFFF;
-    }
-    
-    .ey-badge-workstream {
-        background-color: #24242E;
-        color: #FFE600;
-    }
-    
-    /* Table Styling */
-    .ey-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 10px;
-        font-size: 13px;
-    }
-    
-    .ey-table th {
-        background-color: #17171C;
-        color: #FFE600;
-        text-align: left;
-        padding: 10px 14px;
-        font-weight: 600;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        border: 1px solid #24242E;
-    }
-    
-    .ey-table td {
-        padding: 12px 14px;
-        border: 1px solid #24242E;
-        vertical-align: top;
-        color: #D4D4D8;
-        background-color: #121216;
-    }
-    
-    .ey-table tr:nth-child(even) td {
-        background-color: #0E0E12;
-    }
-    
-    .ey-section-title {
-        font-size: 15px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #FFFFFF;
-        margin: 22px 0 12px 0;
-        padding-bottom: 6px;
-        border-bottom: 1px solid #24242E;
-    }
-    
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background-color: #0E0E12 !important;
-        border-right: 1px solid #24242E !important;
-    }
-    
-    section[data-testid="stSidebar"] * {
-        color: #E4E4E7 !important;
-    }
-    
-    /* High-Contrast EY Action Button */
-    div.stButton > button {
-        background-color: #FFE600 !important;
-        color: #000000 !important;
-        font-weight: 700 !important;
-        border-radius: 2px !important;
-        border: none !important;
-        padding: 10px 24px !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase !important;
-        font-size: 12px !important;
-        width: 100% !important;
-    }
-    
-    div.stButton > button:hover {
-        background-color: #FFF066 !important;
-        color: #000000 !important;
-        border: none !important;
-    }
-    
-    /* Tab Styling */
-    button[data-baseweb="tab"] {
-        font-weight: 600 !important;
-        font-size: 12px !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase !important;
-        color: #71717A !important;
-    }
-    
-    button[data-baseweb="tab"][aria-selected="true"] {
-        color: #FFE600 !important;
-        border-bottom-color: #FFE600 !important;
-        border-bottom-width: 3px !important;
-    }
+/* Button */
+div.stButton > button {
+    background-color: #FFE600 !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+    border-radius: 2px !important;
+    border: none !important;
+    padding: 11px 20px !important;
+    letter-spacing: 0.8px !important;
+    text-transform: uppercase !important;
+    font-size: 11px !important;
+    width: 100% !important;
+    margin-top: 8px !important;
+}
+div.stButton > button:hover {
+    background-color: #FFF176 !important;
+}
 
-    /* Inputs and text areas in dark mode */
-    textarea, input, select {
-        background-color: #121216 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #24242E !important;
-    }
+/* Tabs */
+div[data-testid="stTabs"] button[data-baseweb="tab"] {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    color: #52525B !important;
+    padding: 10px 16px !important;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+    color: #FFE600 !important;
+    border-bottom: 2px solid #FFE600 !important;
+}
+div[data-testid="stTabs"] [data-testid="stTabsContent"] {
+    padding-top: 1.5rem !important;
+}
+
+/* Selectbox, radio */
+div[data-baseweb="select"] > div {
+    background-color: #111115 !important;
+    border-color: #27272A !important;
+    color: #F4F4F5 !important;
+}
+div[data-baseweb="radio"] label span {
+    color: #A1A1AA !important;
+}
+textarea {
+    background-color: #111115 !important;
+    border-color: #27272A !important;
+    color: #D4D4D8 !important;
+    font-size: 12px !important;
+}
+div[data-testid="stFileUploader"] {
+    background-color: #111115 !important;
+    border: 1px dashed #27272A !important;
+    border-radius: 4px !important;
+}
+
+/* Download buttons */
+div.stDownloadButton > button {
+    background-color: transparent !important;
+    color: #FFE600 !important;
+    border: 1px solid #FFE600 !important;
+    font-weight: 600 !important;
+    border-radius: 2px !important;
+    padding: 8px 16px !important;
+    font-size: 11px !important;
+    letter-spacing: 0.8px !important;
+    text-transform: uppercase !important;
+    width: 100% !important;
+}
+div.stDownloadButton > button:hover {
+    background-color: #FFE600 !important;
+    color: #000000 !important;
+}
+
+/* Spinner */
+div[data-testid="stSpinner"] p { color: #A1A1AA !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# Top Yellow Brand Accent Bar (placed immediately at top with 0 gap)
-st.markdown('<div class="ey-top-accent"></div>', unsafe_allow_html=True)
 
-# EY Corporate Masthead
+# ─────────────────────────── HEADER ───────────────────────────
+st.markdown('<div style="height:5px;background:#FFE600;margin-bottom:1.5rem;"></div>', unsafe_allow_html=True)
+
 st.markdown("""
-<div class="ey-masthead">
-    <div class="ey-brand-label">EY Strategy and Transactions | M&A Due Diligence</div>
-    <div class="ey-main-title">ContractSwarm Autonomous Diligence Fabric</div>
-    <div class="ey-sub-title">Multi-agent cognitive orchestration for virtual data room liability audits, contractual risk indexing, and deal governance.</div>
+<div style="
+    background:#111115;
+    border-left:4px solid #FFE600;
+    border:1px solid #1F1F28;
+    border-left:4px solid #FFE600;
+    padding:24px 28px;
+    border-radius:2px;
+    margin-bottom:2rem;
+">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;color:#FFE600;margin-bottom:8px;">
+        EY Strategy and Transactions &nbsp;|&nbsp; M&A Due Diligence
+    </div>
+    <div style="font-size:22px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;margin-bottom:4px;">
+        ContractSwarm Autonomous Diligence Fabric
+    </div>
+    <div style="font-size:13px;color:#71717A;font-weight:400;line-height:1.5;">
+        Multi-agent cognitive orchestration for virtual data room liability audits, contractual risk indexing, and deal governance.
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
+
+# ─────────────────────────── SIDEBAR ───────────────────────────
 parser = DocumentParser()
 
 st.sidebar.markdown("""
-<div style="padding-bottom: 12px; border-bottom: 1px solid #24242E; margin-bottom: 16px;">
-    <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #FFE600;">Diligence Engagement</div>
-    <div style="font-size: 12px; color: #9E9EA8; margin-top: 4px;">Engagement: Project Horizon Due Diligence</div>
-    <div style="font-size: 12px; color: #9E9EA8;">Advisor: EY Strategy and Transactions</div>
+<div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid #1F1F28;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#FFE600;margin-bottom:6px;">Engagement</div>
+    <div style="font-size:12px;color:#71717A;">Project Horizon Due Diligence</div>
+    <div style="font-size:12px;color:#71717A;">EY Strategy and Transactions</div>
 </div>
 """, unsafe_allow_html=True)
 
-st.sidebar.markdown("### Document Intake Mode")
+st.sidebar.markdown("### Contract Source")
+
+vdr_dir = "vdr_docs"
+sample_zips = sorted([f for f in os.listdir(vdr_dir) if f.endswith(".zip")]) if os.path.exists(vdr_dir) else []
+sample_pdfs = sorted([f for f in os.listdir(vdr_dir) if f.endswith(".pdf")]) if os.path.exists(vdr_dir) else []
+
 input_mode = st.sidebar.radio(
-    "Select Intake Source",
-    [
-        "Preloaded VDR ZIP Package",
-        "Upload VDR ZIP Package",
-        "Preloaded Individual PDF",
-        "Upload Single PDF",
-        "Direct Text Input"
-    ],
+    "source",
+    ["VDR ZIP Package", "Single PDF", "Paste Text"],
     label_visibility="collapsed"
 )
 
+# Document selection — only load bytes, never auto-run
+contract_ready = False
 active_contracts: dict[str, str] = {}
-active_package_name = "VDR Target Batch"
+active_package_name = ""
 
-vdr_dir = "vdr_docs"
-sample_pdfs = []
-sample_zips = []
-if os.path.exists(vdr_dir):
-    sample_pdfs = sorted([f for f in os.listdir(vdr_dir) if f.endswith(".pdf")])
-    sample_zips = sorted([f for f in os.listdir(vdr_dir) if f.endswith(".zip")])
-
-if input_mode == "Preloaded VDR ZIP Package":
-    if sample_zips:
-        chosen_zip = st.sidebar.selectbox("VDR ZIP Selection", sample_zips)
-        active_package_name = chosen_zip
-        zip_full_path = os.path.join(vdr_dir, chosen_zip)
-        active_contracts = parser.parse_vdr_zip(zip_full_path)
-    else:
-        st.sidebar.warning("No sample ZIP packages found in vdr_docs.")
-
-elif input_mode == "Upload VDR ZIP Package":
-    uploaded_zip = st.sidebar.file_uploader("Upload Corporate Contracts ZIP Archive", type=["zip"])
-    if uploaded_zip is not None:
-        active_package_name = uploaded_zip.name
-        active_contracts = parser.parse_vdr_zip(uploaded_zip)
-
-elif input_mode == "Preloaded Individual PDF":
-    if sample_pdfs:
-        chosen_pdf = st.sidebar.selectbox("PDF Selection", sample_pdfs)
-        active_package_name = chosen_pdf
-        pdf_full_path = os.path.join(vdr_dir, chosen_pdf)
-        txt = parser.parse_file(pdf_full_path)
-        active_contracts = {chosen_pdf: txt}
-    else:
-        st.sidebar.warning("No sample PDFs found.")
-
-elif input_mode == "Upload Single PDF":
-    uploaded_pdf = st.sidebar.file_uploader("Upload Single PDF Contract", type=["pdf"])
-    if uploaded_pdf is not None:
-        active_package_name = uploaded_pdf.name
-        txt = parser.parse_pdf_bytes(uploaded_pdf.read(), uploaded_pdf.name)
-        active_contracts = {uploaded_pdf.name: txt}
-
-elif input_mode == "Direct Text Input":
-    active_package_name = "Manual Contract Excerpt"
-    default_text = (
-        "CONFIDENTIAL - MERGER AGREEMENT\n\n"
-        "SECTION 4.1 INDEMNIFICATION\n"
-        "Target agrees to indemnify and hold harmless the Buyer against all claims without limitation.\n\n"
-        "SECTION 7.3 CHANGE OF CONTROL\n"
-        "Transaction triggers change of control rights and debt acceleration.\n\n"
-        "SECTION 9.2 LIQUIDATED DAMAGES\n"
-        "Delay in completion incurs liquidated damages of $250,000 per business day penalty.\n\n"
-        "SECTION 10.4 COMMERCIAL TERMS\n"
-        "All invoices are structured under Net 90 extended credit.\n\n"
-        "SECTION 14.1 EXECUTIVE SEVERANCE\n"
-        "Golden parachute severance packages triggered upon deal closing date.\n\n"
-        "SECTION 15.2 RESTRICTIVE COVENANTS\n"
-        "Personnel bound by 24-month non-compete covenants."
+if input_mode == "VDR ZIP Package":
+    source = st.sidebar.radio(
+        "zip_source",
+        ["Use preloaded sample", "Upload your own"],
+        label_visibility="collapsed"
     )
-    manual_txt = st.sidebar.text_area("Contract Text", value=default_text, height=200)
-    active_contracts = {"Manual_Excerpt.txt": manual_txt}
+    if source == "Use preloaded sample":
+        if sample_zips:
+            chosen = st.sidebar.selectbox("Select ZIP", sample_zips)
+            active_package_name = chosen
+            contract_ready = True
+        else:
+            st.sidebar.caption("No sample ZIPs found.")
+    else:
+        up = st.sidebar.file_uploader("Upload ZIP archive", type=["zip"])
+        if up:
+            active_package_name = up.name
+            # Store raw bytes in session state to avoid re-read on rerun
+            st.session_state["_zip_bytes"] = up.read()
+            contract_ready = True
 
-st.sidebar.markdown(f"""
-<div style="margin-top: 16px; padding: 12px; background-color: #121216; border: 1px solid #24242E; border-radius: 2px;">
-    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #FFE600;">VDR Ingestion Summary</div>
-    <div style="font-size: 12px; font-weight: 600; color: #FFFFFF; margin-top: 2px; word-break: break-all;">{active_package_name}</div>
-    <div style="font-size: 11px; color: #9E9EA8; margin-top: 4px;">Contracts Ingested: {len(active_contracts)}</div>
+elif input_mode == "Single PDF":
+    source = st.sidebar.radio(
+        "pdf_source",
+        ["Use preloaded sample", "Upload your own"],
+        label_visibility="collapsed"
+    )
+    if source == "Use preloaded sample":
+        if sample_pdfs:
+            chosen = st.sidebar.selectbox("Select PDF", sample_pdfs)
+            active_package_name = chosen
+            contract_ready = True
+        else:
+            st.sidebar.caption("No sample PDFs found.")
+    else:
+        up = st.sidebar.file_uploader("Upload PDF", type=["pdf"])
+        if up:
+            active_package_name = up.name
+            st.session_state["_pdf_bytes"] = up.read()
+            st.session_state["_pdf_name"] = up.name
+            contract_ready = True
+
+elif input_mode == "Paste Text":
+    pasted = st.sidebar.text_area(
+        "Contract text",
+        placeholder="Paste contract clauses here...",
+        height=180
+    )
+    if pasted.strip():
+        active_package_name = "Pasted Contract"
+        contract_ready = True
+
+st.sidebar.markdown("<div style='margin-top:1.5rem;'>", unsafe_allow_html=True)
+st.sidebar.markdown("### Swarm Agents")
+agent_legal = st.sidebar.checkbox("Legal Workstream", value=True)
+agent_fin   = st.sidebar.checkbox("Financial Workstream", value=True)
+agent_hr    = st.sidebar.checkbox("Human Capital Workstream", value=True)
+st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
+run_btn = st.sidebar.button("EXECUTE AUDIT", disabled=(not contract_ready))
+
+
+# ─────────────────────────── RUN AUDIT ───────────────────────────
+if run_btn and contract_ready:
+    # Build contract map only on explicit button press
+    with st.spinner("Running multi-agent diligence protocol..."):
+        if input_mode == "VDR ZIP Package":
+            if source == "Use preloaded sample":
+                active_contracts = parser.parse_vdr_zip(os.path.join(vdr_dir, chosen))
+            else:
+                active_contracts = parser.parse_vdr_zip(io.BytesIO(st.session_state.get("_zip_bytes", b"")))
+
+        elif input_mode == "Single PDF":
+            if source == "Use preloaded sample":
+                txt = parser.parse_file(os.path.join(vdr_dir, chosen))
+                active_contracts = {chosen: txt}
+            else:
+                b = st.session_state.get("_pdf_bytes", b"")
+                n = st.session_state.get("_pdf_name", "contract.pdf")
+                active_contracts = {n: parser.parse_pdf_bytes(b, n)}
+
+        elif input_mode == "Paste Text":
+            active_contracts = {"Pasted_Contract.txt": pasted}
+
+        # Build state and run swarm
+        initial = VDRAnalysisState(
+            vdr_package_name=active_package_name,
+            contracts=active_contracts,
+            contract_text="\n\n".join(active_contracts.values()),
+        )
+        final = run_contract_swarm(initial)
+
+        # Apply agent toggles
+        allowed = []
+        if agent_legal: allowed.append("Legal")
+        if agent_fin:   allowed.append("Financial")
+        if agent_hr:    allowed.append("HR")
+        final.risks = [r for r in final.risks if r.category in allowed]
+
+        st.session_state["results"] = final
+        st.session_state["package_name"] = active_package_name
+
+
+# ─────────────────────────── EMPTY STATE ───────────────────────────
+if "results" not in st.session_state:
+    st.markdown("""
+<div style="
+    margin-top:3rem;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    gap:12px;
+">
+    <div style="
+        width:56px;height:56px;
+        border:2px solid #27272A;
+        border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        margin:0 auto 8px;
+    ">
+        <div style="width:24px;height:2px;background:#FFE600;"></div>
+    </div>
+    <div style="font-size:18px;font-weight:700;color:#FFFFFF;">
+        No audit executed yet
+    </div>
+    <div style="font-size:13px;color:#71717A;max-width:400px;line-height:1.6;">
+        Select a contract source from the sidebar and click
+        <span style="color:#FFE600;font-weight:600;">EXECUTE AUDIT</span>
+        to initiate the multi-agent due diligence protocol.
+    </div>
+</div>
+""", unsafe_allow_html=True)
+    st.stop()
+
+
+# ─────────────────────────── RESULTS ───────────────────────────
+state: VDRAnalysisState = st.session_state["results"]
+risks   = state.risks
+metrics = state.portfolio_metrics
+
+high = sum(1 for r in risks if r.severity == "High")
+med  = sum(1 for r in risks if r.severity == "Medium")
+low  = sum(1 for r in risks if r.severity == "Low")
+n_contracts = len(state.contracts) if state.contracts else 1
+status = "ACTION REQUIRED" if high > 0 else ("MONITORING" if med > 0 else "SATISFACTORY")
+status_color = "#DC2626" if high > 0 else ("#F59E0B" if med > 0 else "#22C55E")
+
+
+# ── KPI Row ──
+def kpi_card(label, value, sub, accent="#3F3F46"):
+    return f"""
+<div style="
+    flex:1;
+    background:#111115;
+    border:1px solid #1F1F28;
+    border-top:2px solid {accent};
+    border-radius:2px;
+    padding:20px 20px 16px;
+">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#71717A;margin-bottom:10px;">{label}</div>
+    <div style="font-size:30px;font-weight:700;color:#FFFFFF;line-height:1;">{value}</div>
+    <div style="font-size:11px;color:#52525B;margin-top:6px;">{sub}</div>
+</div>"""
+
+st.markdown(f"""
+<div style="display:flex;gap:14px;margin-bottom:1.5rem;">
+    {kpi_card("Contracts Audited",    n_contracts, "In this VDR package")}
+    {kpi_card("Liabilities Flagged",  len(risks),  "FAISS-indexed clauses")}
+    {kpi_card("High Severity",        high,        "Require deal remediation", "#DC2626")}
+    {kpi_card("Clearance Status",     status,      "EY Transaction Guidelines", status_color)}
 </div>
 """, unsafe_allow_html=True)
 
-st.sidebar.markdown("### Swarm Agents")
-agent_legal = st.sidebar.checkbox("Legal Workstream Agent", value=True)
-agent_fin = st.sidebar.checkbox("Financial Workstream Agent", value=True)
-agent_hr = st.sidebar.checkbox("Human Capital Workstream Agent", value=True)
 
-run_audit = st.sidebar.button("EXECUTE DUE DILIGENCE AUDIT")
+# ── Executive Summary ──
+st.markdown(f"""
+<div style="
+    background:#111115;
+    border:1px solid #1F1F28;
+    border-left:3px solid #FFE600;
+    border-radius:2px;
+    padding:20px 24px;
+    margin-bottom:2rem;
+">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#FFE600;margin-bottom:10px;">
+        M&A Partner Executive Summary
+    </div>
+    <div style="font-size:14px;color:#D4D4D8;line-height:1.7;">
+        {state.executive_summary}
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-if "audit_results" not in st.session_state:
-    st.session_state["audit_results"] = None
-    st.session_state["audited_package"] = None
 
-if run_audit or (st.session_state["audit_results"] is None and active_contracts):
-    if not active_contracts:
-        st.warning("Please provide or upload contracts to initiate audit.")
+# ── Tabs ──
+tab1, tab2, tab3, tab4 = st.tabs([
+    "RISK MATRIX",
+    "WORKSTREAM BREAKDOWN",
+    "CONTRACT CLAUSES",
+    "EXPORT"
+])
+
+
+# ── Tab 1: Risk Matrix ──
+with tab1:
+    # Filters
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        f_contract = st.selectbox("Contract", ["All"] + list(state.contracts.keys()), key="f_c")
+    with c2:
+        f_ws = st.selectbox("Workstream", ["All", "Legal", "Financial", "HR"], key="f_w")
+    with c3:
+        f_sev = st.selectbox("Severity", ["All", "High", "Medium", "Low"], key="f_s")
+
+    filtered = risks
+    if f_contract != "All": filtered = [r for r in filtered if r.contract_name == f_contract]
+    if f_ws      != "All": filtered = [r for r in filtered if r.category == f_ws]
+    if f_sev     != "All": filtered = [r for r in filtered if r.severity == f_sev]
+
+    st.markdown(f"<div style='font-size:12px;color:#52525B;margin:1rem 0 0.75rem;'>{len(filtered)} finding(s) shown</div>", unsafe_allow_html=True)
+
+    if not filtered:
+        st.markdown("<div style='font-size:13px;color:#52525B;padding:1rem 0;'>No findings match the selected filters.</div>", unsafe_allow_html=True)
     else:
-        with st.spinner("Executing LangGraph multi-agent diligence protocol with FAISS vector indexing..."):
-            initial_state = VDRAnalysisState(
-                vdr_package_name=active_package_name,
-                contracts=active_contracts,
-                contract_text="\n\n".join(active_contracts.values()),
-                risks=[]
-            )
-            final_state = run_contract_swarm(initial_state)
-            
-            active_categories = []
-            if agent_legal:
-                active_categories.append("Legal")
-            if agent_fin:
-                active_categories.append("Financial")
-            if agent_hr:
-                active_categories.append("HR")
-                
-            filtered_risks = [r for r in final_state.risks if r.category in active_categories]
-            final_state.risks = filtered_risks
-            
-            st.session_state["audit_results"] = final_state
-            st.session_state["audited_package"] = active_package_name
-
-audit_state = st.session_state.get("audit_results")
-
-if audit_state is not None:
-    risks = audit_state.risks
-    metrics = audit_state.portfolio_metrics
-    high_count = sum(1 for r in risks if r.severity == "High")
-    med_count = sum(1 for r in risks if r.severity == "Medium")
-    low_count = sum(1 for r in risks if r.severity == "Low")
-    
-    num_contracts = len(audit_state.contracts) if audit_state.contracts else 1
-    status_label = "ACTION REQUIRED" if high_count > 0 else ("MONITORING" if med_count > 0 else "SATISFACTORY")
-    status_class = "ey-kpi-card-high" if high_count > 0 else "ey-kpi-card-status"
-
-    st.markdown(f"""
-    <div class="ey-kpi-container">
-        <div class="ey-kpi-card">
-            <div class="ey-kpi-label">VDR Contracts Audited</div>
-            <div class="ey-kpi-value">{num_contracts}</div>
-            <div class="ey-kpi-subtext">Multi-contract corporate archive</div>
-        </div>
-        <div class="ey-kpi-card">
-            <div class="ey-kpi-label">Total Liabilities Flagged</div>
-            <div class="ey-kpi-value">{len(risks)}</div>
-            <div class="ey-kpi-subtext">Indexed via FAISS vector store</div>
-        </div>
-        <div class="ey-kpi-card ey-kpi-card-high">
-            <div class="ey-kpi-label">High Severity Exposure</div>
-            <div class="ey-kpi-value" style="color: #DC2626;">{high_count}</div>
-            <div class="ey-kpi-subtext">Deal structuring remediation</div>
-        </div>
-        <div class="ey-kpi-card {status_class}">
-            <div class="ey-kpi-label">Diligence Clearance Status</div>
-            <div class="ey-kpi-value" style="font-size: 20px; font-weight: 700; padding-top: 4px; color: #FFE600;">{status_label}</div>
-            <div class="ey-kpi-subtext">EY Transaction Guidelines</div>
+        for r in filtered:
+            sev_color = "#DC2626" if r.severity == "High" else ("#F59E0B" if r.severity == "Medium" else "#2563EB")
+            sev_bg    = "#1C0A0A" if r.severity == "High" else ("#1C1200" if r.severity == "Medium" else "#0A0F1C")
+            st.markdown(f"""
+<div style="
+    background:#111115;
+    border:1px solid #1F1F28;
+    border-left:3px solid {sev_color};
+    border-radius:2px;
+    padding:18px 22px;
+    margin-bottom:10px;
+">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <span style="
+                    font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+                    padding:2px 7px;border-radius:2px;
+                    background:{sev_bg};color:{sev_color};border:1px solid {sev_color};
+                ">{r.severity}</span>
+                <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+                    padding:2px 7px;border-radius:2px;background:#18181B;color:#A1A1AA;border:1px solid #27272A;
+                ">{r.category}</span>
+                <span style="font-size:11px;color:#52525B;">{r.contract_name}</span>
+            </div>
+            <div style="font-size:14px;font-weight:600;color:#FFFFFF;margin-bottom:6px;">{r.clause_reference}</div>
+            <div style="font-size:13px;color:#A1A1AA;line-height:1.5;margin-bottom:10px;">{r.description}</div>
+            <div style="font-size:12px;color:#D4D4D8;background:#18181B;border:1px solid #27272A;padding:10px 14px;border-radius:2px;line-height:1.5;">
+                <span style="color:#71717A;font-weight:600;">Advisory Action: </span>{r.mitigation}
+            </div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="ey-summary-box">
-        <div class="ey-summary-title">M&A Partner Executive Summary</div>
-        <p class="ey-summary-text">{audit_state.executive_summary}</p>
+
+# ── Tab 2: Workstream Breakdown ──
+with tab2:
+    ws_data = {
+        "Legal":     [r for r in risks if r.category == "Legal"],
+        "Financial": [r for r in risks if r.category == "Financial"],
+        "HR":        [r for r in risks if r.category == "HR"],
+    }
+    ws_labels = {
+        "Legal":     "Legal and Regulatory",
+        "Financial": "Financial and Commercial",
+        "HR":        "Human Capital and Compensation",
+    }
+
+    for ws, ws_risks in ws_data.items():
+        h = sum(1 for r in ws_risks if r.severity == "High")
+        m = sum(1 for r in ws_risks if r.severity == "Medium")
+        l = sum(1 for r in ws_risks if r.severity == "Low")
+        total = len(ws_risks)
+
+        st.markdown(f"""
+<div style="
+    background:#111115;border:1px solid #1F1F28;border-radius:2px;
+    padding:16px 20px;margin-bottom:8px;
+    display:flex;justify-content:space-between;align-items:center;
+">
+    <div>
+        <div style="font-size:13px;font-weight:600;color:#FFFFFF;">{ws_labels[ws]} Workstream</div>
+        <div style="font-size:11px;color:#71717A;margin-top:2px;">{total} finding(s)</div>
     </div>
-    """, unsafe_allow_html=True)
+    <div style="display:flex;gap:8px;">
+        <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:2px;
+            background:#1C0A0A;color:#DC2626;border:1px solid #DC2626;">{h} High</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:2px;
+            background:#1C1200;color:#F59E0B;border:1px solid #F59E0B;">{m} Medium</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:2px;
+            background:#0A0F1C;color:#2563EB;border:1px solid #2563EB;">{l} Low</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "PORTFOLIO DASHBOARD",
-        "UNIFIED RISK MATRIX",
-        "WORKSTREAM ANALYSIS",
-        "CONTRACT CLAUSES",
-        "M&A PARTNER MEMO & EXPORT"
-    ])
-
-    with tab1:
-        st.markdown('<div class="ey-section-title">Portfolio Distribution and Contract Breakdown</div>', unsafe_allow_html=True)
-        col_c1, col_c2 = st.columns([1, 1])
-        
-        with col_c1:
-            contract_counts = metrics.get("contract_breakdown", {})
-            if not contract_counts and audit_state.contracts:
-                for c in audit_state.contracts.keys():
-                    contract_counts[c] = sum(1 for r in risks if r.contract_name == c)
-                    
-            df_contracts = pd.DataFrame(
-                [{"Contract Document": k, "Liabilities Identified": v} for k, v in contract_counts.items()]
-            )
-            st.dataframe(df_contracts, hide_index=True, width="stretch")
-
-        with col_c2:
-            workstream_counts = {
-                "Legal Workstream": sum(1 for r in risks if r.category == "Legal"),
-                "Financial Workstream": sum(1 for r in risks if r.category == "Financial"),
-                "Human Capital Workstream": sum(1 for r in risks if r.category == "HR")
-            }
-            df_ws = pd.DataFrame(list(workstream_counts.items()), columns=["Workstream", "Flagged Liabilities"])
-            st.dataframe(df_ws, hide_index=True, width="stretch")
-
-        st.markdown('<div class="ey-section-title">Critical High Severity Liabilities</div>', unsafe_allow_html=True)
-        priority_risks = [r for r in risks if r.severity == "High"]
-        if priority_risks:
-            for idx, pr in enumerate(priority_risks, 1):
-                st.markdown(f"""
-                <div class="ey-finding-card" style="border-left: 4px solid #DC2626;">
-                    <div style="margin-bottom: 6px;">
-                        <span class="ey-badge ey-badge-high">HIGH SEVERITY</span>
-                        <span class="ey-badge ey-badge-workstream">{pr.category.upper()} WORKSTREAM</span>
-                        <span style="font-size: 11px; font-weight: 600; color: #9E9EA8;">Document: {pr.contract_name}</span>
-                    </div>
-                    <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin: 4px 0;">{pr.clause_reference}</div>
-                    <div style="font-size: 13px; color: #D4D4D8; margin: 6px 0;"><strong>Identified Liability:</strong> {pr.description}</div>
-                    <div style="font-size: 13px; color: #FFFFFF; background-color: #17171C; padding: 10px 14px; border: 1px solid #24242E; border-left: 3px solid #FFE600; border-radius: 2px;">
-                        <strong>Recommended EY Action:</strong> {pr.mitigation}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No high severity liabilities detected across the audited portfolio.")
-
-    with tab2:
-        st.markdown('<div class="ey-section-title">Unified Multi-Contract Risk Matrix</div>', unsafe_allow_html=True)
-        
-        col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-        with col_f1:
-            contract_options = ["All Contracts"] + list(audit_state.contracts.keys())
-            c_filter = st.selectbox("Filter by Contract Document", contract_options)
-        with col_f2:
-            ws_filter = st.selectbox("Filter by Workstream", ["All Workstreams", "Legal", "Financial", "HR"])
-        with col_f3:
-            s_filter = st.selectbox("Filter by Severity", ["All Severities", "High", "Medium", "Low"])
-            
-        display_risks = risks
-        if c_filter != "All Contracts":
-            display_risks = [r for r in display_risks if r.contract_name == c_filter]
-        if ws_filter != "All Workstreams":
-            display_risks = [r for r in display_risks if r.category == ws_filter]
-        if s_filter != "All Severities":
-            display_risks = [r for r in display_risks if r.severity == s_filter]
-
-        if display_risks:
-            table_rows = []
-            for r in display_risks:
-                sev_badge_class = "ey-badge-high" if r.severity == "High" else ("ey-badge-medium" if r.severity == "Medium" else "ey-badge-low")
-                row_html = f"""
-                <tr>
-                    <td style="font-weight: 600; font-size: 12px; color: #FFE600;">{r.contract_name}</td>
-                    <td style="font-weight: 600; white-space: nowrap; color: #FFFFFF;">{r.category}</td>
-                    <td><span class="ey-badge {sev_badge_class}">{r.severity.upper()}</span></td>
-                    <td style="font-weight: 600; color: #FFFFFF;">{r.clause_reference}</td>
-                    <td>{r.description}</td>
-                    <td style="background-color: #17171C; color: #FFFFFF;">{r.mitigation}</td>
-                </tr>
-                """
-                table_rows.append(row_html)
-                
-            table_html = f"""
-            <table class="ey-table">
-                <thead>
-                    <tr>
-                        <th style="width: 18%;">Contract Document</th>
-                        <th style="width: 10%;">Workstream</th>
-                        <th style="width: 8%;">Severity</th>
-                        <th style="width: 20%;">Clause Reference</th>
-                        <th style="width: 22%;">Liability Description</th>
-                        <th style="width: 22%;">EY Recommended Mitigation</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {''.join(table_rows)}
-                </tbody>
-            </table>
-            """
-            st.markdown(table_html, unsafe_allow_html=True)
-        else:
-            st.info("No liabilities match the specified filter criteria.")
-
-    with tab3:
-        st.markdown('<div class="ey-section-title">Specialized Workstream Findings</div>', unsafe_allow_html=True)
-        workstreams = ["Legal", "Financial", "HR"]
-        ws_labels = {
-            "Legal": "Legal and Regulatory Workstream",
-            "Financial": "Financial, Treasury, and Commercial Workstream",
-            "HR": "Human Capital and Executive Compensation Workstream"
-        }
-        
-        for ws in workstreams:
-            ws_risks = [r for r in risks if r.category == ws]
-            st.markdown(f"#### {ws_labels[ws]}")
-            if ws_risks:
-                for idx, r in enumerate(ws_risks, 1):
-                    sev_class = "ey-badge-high" if r.severity == "High" else ("ey-badge-medium" if r.severity == "Medium" else "ey-badge-low")
+        if ws_risks:
+            with st.expander(f"View {total} {ws} finding(s)", expanded=False):
+                for r in ws_risks:
+                    sev_color = "#DC2626" if r.severity == "High" else ("#F59E0B" if r.severity == "Medium" else "#2563EB")
                     st.markdown(f"""
-                    <div class="ey-finding-card">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-size: 13px; font-weight: 700; color: #FFFFFF;">Finding {idx:02d}: {r.clause_reference}</span>
-                            <span class="ey-badge {sev_class}">{r.severity.upper()}</span>
-                        </div>
-                        <div style="font-size: 11px; color: #9E9EA8; margin-bottom: 6px;">Document: {r.contract_name}</div>
-                        <p style="font-size: 13px; color: #D4D4D8; margin: 4px 0 8px 0;">{r.description}</p>
-                        <div style="font-size: 12px; color: #FFFFFF; background-color: #17171C; padding: 8px 12px; border-left: 3px solid #FFE600;">
-                            <strong>Advisory Action:</strong> {r.mitigation}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"<p style='font-size: 13px; color: #71717A;'>No liabilities detected under {ws} workstream.</p>", unsafe_allow_html=True)
-            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+<div style="border-left:2px solid {sev_color};padding:10px 14px;margin-bottom:10px;">
+    <div style="font-size:13px;font-weight:600;color:#FFFFFF;margin-bottom:4px;">{r.clause_reference}</div>
+    <div style="font-size:11px;color:#52525B;margin-bottom:6px;">{r.contract_name}</div>
+    <div style="font-size:12px;color:#A1A1AA;line-height:1.5;margin-bottom:6px;">{r.description}</div>
+    <div style="font-size:12px;color:#D4D4D8;"><span style="color:#71717A;">Action:</span> {r.mitigation}</div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("")
 
-    with tab4:
-        st.markdown('<div class="ey-section-title">Audited Contract Clause Repository</div>', unsafe_allow_html=True)
-        if audit_state.contracts:
-            selected_inspect_doc = st.selectbox("Select Contract Document to Inspect", list(audit_state.contracts.keys()))
-            inspected_text = audit_state.contracts.get(selected_inspect_doc, "")
-            st.markdown(f"**Document Name:** {selected_inspect_doc}")
-            st.markdown(f"**Character Count:** {len(inspected_text)} | **Word Count:** {len(inspected_text.split())}")
-            st.text_area(
-                "Extracted Clauses",
-                value=inspected_text,
-                height=360,
-                disabled=True,
-                label_visibility="collapsed"
-            )
-        else:
-            st.text_area("Contract Clauses Excerpt", value=audit_state.contract_text, height=360, disabled=True)
 
-    with tab5:
-        st.markdown('<div class="ey-section-title">M&A Partner Deliverables & Formal Memorandum</div>', unsafe_allow_html=True)
-        
-        memo_lines = [
-            "================================================================================",
-            "ERNST & YOUNG STRATEGY AND TRANSACTIONS - M&A DUE DILIGENCE EXECUTIVE MEMO",
-            "================================================================================",
-            f"VDR PACKAGE: {st.session_state.get('audited_package', 'VDR Archive')}",
-            f"DATE OF AUDIT: 2026-11-12",
-            f"ENGAGEMENT: Project Horizon Confirmatory Due Diligence",
-            f"TOTAL CONTRACTS AUDITED: {num_contracts}",
-            f"PORTFOLIO CLEARANCE STATUS: {status_label}",
-            "--------------------------------------------------------------------------------",
-            "EXECUTIVE SUMMARY FOR M&A PARTNERS:",
-            audit_state.executive_summary,
-            "--------------------------------------------------------------------------------",
-            "PORTFOLIO PERFORMANCE METRICS:",
-            f"Total Liabilities Flagged : {len(risks)}",
-            f"High Severity Exposure    : {high_count}",
-            f"Medium Severity Items     : {med_count}",
-            f"Low Severity Items        : {low_count}",
-            "--------------------------------------------------------------------------------",
-            "UNIFIED RISK MATRIX FINDINGS ACROSS VDR CONTRACTS:",
+# ── Tab 3: Contract Clauses ──
+with tab3:
+    if state.contracts:
+        doc_sel = st.selectbox("Document", list(state.contracts.keys()))
+        txt = state.contracts[doc_sel]
+        wc = len(txt.split())
+        st.markdown(f"""
+<div style="display:flex;gap:24px;margin-bottom:1rem;">
+    <div style="font-size:11px;color:#71717A;">Words: <span style="color:#A1A1AA;font-weight:600;">{wc}</span></div>
+    <div style="font-size:11px;color:#71717A;">Characters: <span style="color:#A1A1AA;font-weight:600;">{len(txt)}</span></div>
+</div>
+""", unsafe_allow_html=True)
+        st.text_area("", value=txt, height=400, disabled=True, label_visibility="collapsed")
+    else:
+        st.markdown("<div style='font-size:13px;color:#52525B;'>No contract text available.</div>", unsafe_allow_html=True)
+
+
+# ── Tab 4: Export ──
+with tab4:
+    pkg_name = st.session_state.get("package_name", "VDR Package")
+
+    memo_lines = [
+        "=" * 80,
+        "ERNST & YOUNG STRATEGY AND TRANSACTIONS",
+        "M&A DUE DILIGENCE EXECUTIVE MEMORANDUM",
+        "=" * 80,
+        f"VDR PACKAGE          : {pkg_name}",
+        f"DATE OF AUDIT        : 2026-11-12",
+        f"ENGAGEMENT           : Project Horizon Confirmatory Due Diligence",
+        f"CONTRACTS AUDITED    : {n_contracts}",
+        f"CLEARANCE STATUS     : {status}",
+        "-" * 80,
+        "EXECUTIVE SUMMARY:",
+        "",
+        state.executive_summary,
+        "",
+        "-" * 80,
+        "PORTFOLIO METRICS:",
+        f"  Total Liabilities  : {len(risks)}",
+        f"  High Severity      : {high}",
+        f"  Medium Severity    : {med}",
+        f"  Low Severity       : {low}",
+        "",
+        "-" * 80,
+        "RISK MATRIX:",
+        "",
+    ]
+    for i, r in enumerate(risks, 1):
+        memo_lines += [
+            f"[{i:02d}] {r.contract_name}",
+            f"     Workstream  : {r.category}  |  Severity: {r.severity}",
+            f"     Clause      : {r.clause_reference}",
+            f"     Liability   : {r.description}",
+            f"     Action      : {r.mitigation}",
+            "",
         ]
-        
-        for idx, r in enumerate(risks, 1):
-            memo_lines.extend([
-                f"\n[{idx:02d}] DOCUMENT: {r.contract_name}",
-                f"     WORKSTREAM        : {r.category.upper()} | SEVERITY: {r.severity.upper()}",
-                f"     CLAUSE REFERENCE  : {r.clause_reference}",
-                f"     LIABILITY SUMMARY : {r.description}",
-                f"     RECOMMENDED ACTION: {r.mitigation}"
-            ])
-            
-        memo_lines.extend([
-            "\n================================================================================",
-            "END OF MEMORANDUM - EY CONFIDENTIAL WORK PRODUCT FOR M&A PARTNERS",
-            "================================================================================"
-        ])
-        
-        full_memo_text = "\n".join(memo_lines)
-        st.text_area("M&A Partner Memo Preview", value=full_memo_text, height=280, disabled=True)
-        
-        col_d1, col_d2 = st.columns([1, 1])
-        with col_d1:
-            st.download_button(
-                label="DOWNLOAD PARTNER MEMO (.TXT)",
-                data=full_memo_text,
-                file_name="EY_MA_Partner_Due_Diligence_Memo.txt",
-                mime="text/plain"
-            )
-        with col_d2:
-            json_export = json.dumps({
-                "engagement": "Project Horizon Due Diligence",
-                "vdr_package": st.session_state.get("audited_package", "VDR Archive"),
-                "status": status_label,
-                "executive_summary": audit_state.executive_summary,
-                "portfolio_metrics": metrics,
-                "risk_matrix": [r.model_dump() for r in risks]
-            }, indent=2)
-            st.download_button(
-                label="DOWNLOAD UNIFIED RISK MATRIX (.JSON)",
-                data=json_export,
-                file_name="EY_Unified_VDR_Risk_Matrix.json",
-                mime="application/json"
-            )
-else:
-    st.info("Select or upload a VDR contract package and click 'EXECUTE DUE DILIGENCE AUDIT'.")
+    memo_lines += ["=" * 80, "EY CONFIDENTIAL WORK PRODUCT", "=" * 80]
+    memo_text = "\n".join(memo_lines)
+
+    json_out = json.dumps({
+        "engagement": "Project Horizon Due Diligence",
+        "vdr_package": pkg_name,
+        "status": status,
+        "executive_summary": state.executive_summary,
+        "portfolio_metrics": metrics,
+        "risk_matrix": [r.model_dump() for r in risks],
+    }, indent=2)
+
+    st.markdown("""
+<div style="font-size:13px;color:#71717A;margin-bottom:1.5rem;line-height:1.6;">
+    Download the formal audit memorandum or the structured JSON risk matrix
+    for integration with deal management workflows.
+</div>
+""", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+<div style="background:#111115;border:1px solid #1F1F28;border-radius:2px;padding:20px;margin-bottom:12px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#A1A1AA;margin-bottom:4px;">Partner Memo</div>
+    <div style="font-size:12px;color:#52525B;">Plain text formal memorandum for M&A partners and senior counsel.</div>
+</div>
+""", unsafe_allow_html=True)
+        st.download_button("DOWNLOAD MEMO (.TXT)", memo_text, "EY_MA_Diligence_Memo.txt", "text/plain")
+
+    with col2:
+        st.markdown("""
+<div style="background:#111115;border:1px solid #1F1F28;border-radius:2px;padding:20px;margin-bottom:12px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#A1A1AA;margin-bottom:4px;">Risk Matrix JSON</div>
+    <div style="font-size:12px;color:#52525B;">Structured JSON risk matrix for deal system integration and further analysis.</div>
+</div>
+""", unsafe_allow_html=True)
+        st.download_button("DOWNLOAD MATRIX (.JSON)", json_out, "EY_VDR_Risk_Matrix.json", "application/json")
