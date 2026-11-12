@@ -89,9 +89,15 @@ class TestContractSwarmPipeline(unittest.TestCase):
     def test_streamlit_app_execution(self):
         at = AppTest.from_file("app.py", default_timeout=30)
         at.run()
-        self.assertFalse(at.exception, f"Streamlit app raised exception: {at.exception}")
-        self.assertIsNotNone(at.session_state["audit_results"])
-        self.assertGreater(len(at.session_state["audit_results"].risks), 0)
+        self.assertFalse(at.exception, f"Streamlit app raised exception on load: {at.exception}")
+        # Initial load should have clean empty state without pre-filling
+        self.assertIsNone(at.session_state.get("results"))
+
+        # Click the EXECUTE AUDIT button to run the multi-agent swarm
+        at.button[0].click().run()
+        self.assertFalse(at.exception, f"Streamlit app raised exception after run: {at.exception}")
+        self.assertIsNotNone(at.session_state.get("results"))
+        self.assertGreater(len(at.session_state["results"].risks), 0)
 
     def test_no_emojis_or_non_ascii_in_source_code(self):
         py_files = glob.glob("*.py")

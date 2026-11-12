@@ -160,7 +160,7 @@ div[data-testid="stSpinner"] p { color: #A1A1AA !important; }
 """, unsafe_allow_html=True)
 
 
-# ─────────────────────────── HEADER ───────────────────────────
+# --------------------------- HEADER ---------------------------
 st.markdown('<div style="height:5px;background:#FFE600;margin-bottom:1.5rem;"></div>', unsafe_allow_html=True)
 
 st.markdown("""
@@ -186,7 +186,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ─────────────────────────── SIDEBAR ───────────────────────────
+# --------------------------- SIDEBAR ---------------------------
 parser = DocumentParser()
 
 st.sidebar.markdown("""
@@ -209,7 +209,7 @@ input_mode = st.sidebar.radio(
     label_visibility="collapsed"
 )
 
-# Document selection — only load bytes, never auto-run
+# Document selection -- only load bytes, never auto-run
 contract_ready = False
 active_contracts: dict[str, str] = {}
 active_package_name = ""
@@ -276,7 +276,7 @@ st.sidebar.markdown("</div>", unsafe_allow_html=True)
 run_btn = st.sidebar.button("EXECUTE AUDIT", disabled=(not contract_ready))
 
 
-# ─────────────────────────── RUN AUDIT ───────────────────────────
+# --------------------------- RUN AUDIT ---------------------------
 if run_btn and contract_ready:
     # Build contract map only on explicit button press
     with st.spinner("Running multi-agent diligence protocol..."):
@@ -317,7 +317,7 @@ if run_btn and contract_ready:
         st.session_state["package_name"] = active_package_name
 
 
-# ─────────────────────────── EMPTY STATE ───────────────────────────
+# --------------------------- EMPTY STATE ---------------------------
 if "results" not in st.session_state:
     st.markdown("""
 <div style="
@@ -351,7 +351,7 @@ if "results" not in st.session_state:
     st.stop()
 
 
-# ─────────────────────────── RESULTS ───────────────────────────
+# --------------------------- RESULTS ---------------------------
 state: VDRAnalysisState = st.session_state["results"]
 risks   = state.risks
 metrics = state.portfolio_metrics
@@ -364,8 +364,8 @@ status = "ACTION REQUIRED" if high > 0 else ("MONITORING" if med > 0 else "SATIS
 status_color = "#DC2626" if high > 0 else ("#F59E0B" if med > 0 else "#22C55E")
 
 
-# ── KPI Row ──
-def kpi_card(label, value, sub, accent="#3F3F46"):
+# -- KPI Row --
+def kpi_card(label, value, sub, accent="#3F3F46", value_size="30px", text_color="#FFFFFF"):
     return f"""
 <div style="
     flex:1;
@@ -376,21 +376,25 @@ def kpi_card(label, value, sub, accent="#3F3F46"):
     padding:20px 20px 16px;
 ">
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#71717A;margin-bottom:10px;">{label}</div>
-    <div style="font-size:30px;font-weight:700;color:#FFFFFF;line-height:1;">{value}</div>
+    <div style="font-size:{value_size};font-weight:700;color:{text_color};line-height:1.2;letter-spacing:0.5px;">{value}</div>
     <div style="font-size:11px;color:#52525B;margin-top:6px;">{sub}</div>
 </div>"""
 
 st.markdown(f"""
 <div style="display:flex;gap:14px;margin-bottom:1.5rem;">
-    {kpi_card("Contracts Audited",    n_contracts, "In this VDR package")}
-    {kpi_card("Liabilities Flagged",  len(risks),  "FAISS-indexed clauses")}
-    {kpi_card("High Severity",        high,        "Require deal remediation", "#DC2626")}
-    {kpi_card("Clearance Status",     status,      "EY Transaction Guidelines", status_color)}
+    {kpi_card("Contracts Audited",   n_contracts, "In this VDR package")}
+    {kpi_card("Liabilities Flagged", len(risks),  "FAISS-indexed clauses")}
+    {kpi_card("High Severity",       high,        "Require deal remediation", "#DC2626", text_color="#DC2626")}
+    {kpi_card("Clearance Status",    status,      "EY Transaction Guidelines", status_color, value_size="14px", text_color=status_color)}
 </div>
 """, unsafe_allow_html=True)
 
 
-# ── Executive Summary ──
+# -- Executive Summary --
+# Break summary into clean, readable lines
+summary_lines = [line.strip() for line in state.executive_summary.split(".") if line.strip()]
+formatted_summary_html = "".join([f"<div style='margin-bottom:8px;'>{line}.</div>" for line in summary_lines])
+
 st.markdown(f"""
 <div style="
     background:#111115;
@@ -400,17 +404,17 @@ st.markdown(f"""
     padding:20px 24px;
     margin-bottom:2rem;
 ">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#FFE600;margin-bottom:10px;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#FFE600;margin-bottom:12px;">
         M&A Partner Executive Summary
     </div>
     <div style="font-size:14px;color:#D4D4D8;line-height:1.7;">
-        {state.executive_summary}
+        {formatted_summary_html}
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 
-# ── Tabs ──
+# -- Tabs --
 tab1, tab2, tab3, tab4 = st.tabs([
     "RISK MATRIX",
     "WORKSTREAM BREAKDOWN",
@@ -419,7 +423,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 
-# ── Tab 1: Risk Matrix ──
+# -- Tab 1: Risk Matrix --
 with tab1:
     # Filters
     c1, c2, c3 = st.columns(3)
@@ -476,7 +480,7 @@ with tab1:
 """, unsafe_allow_html=True)
 
 
-# ── Tab 2: Workstream Breakdown ──
+# -- Tab 2: Workstream Breakdown --
 with tab2:
     ws_data = {
         "Legal":     [r for r in risks if r.category == "Legal"],
@@ -531,7 +535,7 @@ with tab2:
         st.markdown("")
 
 
-# ── Tab 3: Contract Clauses ──
+# -- Tab 3: Contract Clauses --
 with tab3:
     if state.contracts:
         doc_sel = st.selectbox("Document", list(state.contracts.keys()))
@@ -543,12 +547,12 @@ with tab3:
     <div style="font-size:11px;color:#71717A;">Characters: <span style="color:#A1A1AA;font-weight:600;">{len(txt)}</span></div>
 </div>
 """, unsafe_allow_html=True)
-        st.text_area("", value=txt, height=400, disabled=True, label_visibility="collapsed")
+        st.text_area("Contract Document Text", value=txt, height=400, disabled=True, label_visibility="collapsed")
     else:
         st.markdown("<div style='font-size:13px;color:#52525B;'>No contract text available.</div>", unsafe_allow_html=True)
 
 
-# ── Tab 4: Export ──
+# -- Tab 4: Export --
 with tab4:
     pkg_name = st.session_state.get("package_name", "VDR Package")
 
